@@ -19,7 +19,8 @@
       }
     ],
     "paths": {
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+      "auth-utils": ["./src/lib/auth-utils.ts"]
     }
   },
   "include": [

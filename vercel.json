@@ -1,0 +1,25 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "framework": "nextjs",
+  "buildCommand": "npm run vercel-build",
+  "crons": [
+    {
+      "path": "/api/cron/import-jobs",
+      "schedule": "*/5 * * * *"
+    }
+  ],
+  "functions": {
+    "src/app/api/import/jobs/route.ts": {
+      "maxDuration": 300
+    },
+    "src/app/api/import/jobs/[id]/process/route.ts": {
+      "maxDuration": 300
+    },
+    "src/app/api/cron/import-jobs/route.ts": {
+      "maxDuration": 300
+    },
+    "src/app/api/health/route.ts": {
+      "maxDuration": 30
+    }
+  }
+}

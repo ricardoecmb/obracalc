@@ -12,6 +12,15 @@
 
 # testing
 /coverage
+/playwright-report/
+/test-results/
+/blob-report/
+/playwright/.cache/
+
+# storage local (não versionar arquivos enviados)
+/.storage/
+/backups/
+*.dump
 
 # next.js
 /.next/
@@ -32,6 +41,7 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+!.env.example
 
 # vercel
 .vercel

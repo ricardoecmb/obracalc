@@ -1,0 +1,802 @@
+// ============================================================================
+// ObraCalc - Schema Prisma
+// Sistema de Orçamento de Obras da Construção Civil Brasileira
+// ============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================================
+// AUTENTICAÇÃO E USUÁRIO
+// ============================================================================
+
+model User {
+  id            String    @id @default(cuid())
+  email         String    @unique
+  name          String
+  passwordHash  String    @map("password_hash")
+  emailVerified DateTime? @map("email_verified")
+  image         String?
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @updatedAt @map("updated_at")
+
+  preferences        UserPreferences?
+  professionalProfile ProfessionalProfile?
+  clients            Client[]
+  projects           Project[]
+  budgets            Budget[]
+  bdiConfigs         BdiConfig[]
+  referenceDatabases ReferenceDatabase[]
+  resources          Resource[]
+  compositions       Composition[]
+  importProfiles     ImportProfile[]
+  importJobs         ImportJob[]
+  auditEntries       AuditEntry[]
+  suppliers          Supplier[]
+  unitConversions    UnitConversion[]
+  aiConfigs          AiProviderConfig[]
+  backupLogs         BackupLog[]
+
+  @@map("users")
+}
+
+model UserPreferences {
+  id                    String  @id @default(cuid())
+  userId                String  @unique @map("user_id")
+  locale                String  @default("pt-BR")
+  currency              String  @default("BRL")
+  defaultDecimalPlaces  Int     @default(2) @map("default_decimal_places")
+  defaultRoundingMode   String  @default("ROUND_HALF_UP") @map("default_rounding_mode")
+  defaultBdiConfigId    String? @map("default_bdi_config_id")
+  sidebarCollapsed      Boolean @default(false) @map("sidebar_collapsed")
+  theme                 String  @default("light")
+
+  user       User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  defaultBdi BdiConfig? @relation(fields: [defaultBdiConfigId], references: [id], onDelete: SetNull)
+
+  @@map("user_preferences")
+}
+
+model ProfessionalProfile {
+  id               String  @id @default(cuid())
+  userId           String  @unique @map("user_id")
+  companyName      String? @map("company_name")
+  cnpj             String?
+  professionalName String? @map("professional_name")
+  registrationType String? @map("registration_type") // CREA, CAU
+  registrationNumber String? @map("registration_number")
+  state            String? // UF
+  phone            String?
+  address          String?
+  logoUrl          String? @map("logo_url")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("professional_profiles")
+}
+
+model PasswordResetToken {
+  id        String   @id @default(cuid())
+  email     String
+  token     String   @unique
+  expiresAt DateTime @map("expires_at")
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("password_reset_tokens")
+}
+
+// ============================================================================
+// CLIENTES E OBRAS
+// ============================================================================
+
+model Client {
+  id        String   @id @default(cuid())
+  userId    String   @map("user_id")
+  name      String
+  document  String?  // CPF ou CNPJ
+  email     String?
+  phone     String?
+  address   String?
+  notes     String?
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  projects Project[]
+
+  @@map("clients")
+}
+
+model Project {
+  id          String   @id @default(cuid())
+  userId      String   @map("user_id")
+  clientId    String?  @map("client_id")
+  name        String
+  description String?
+  address     String?
+  city        String?
+  state       String?  // UF
+  status      ProjectStatus @default(ACTIVE)
+  startDate   DateTime?     @map("start_date")
+  endDate     DateTime?     @map("end_date")
+  notes       String?
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  user    User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  client  Client?  @relation(fields: [clientId], references: [id], onDelete: SetNull)
+  budgets Budget[]
+
+  @@map("projects")
+}
+
+enum ProjectStatus {
+  ACTIVE
+  COMPLETED
+  ARCHIVED
+  CANCELLED
+}
+
+// ============================================================================
+// ORÇAMENTOS E REVISÕES
+// ============================================================================
+
+model Budget {
+  id          String       @id @default(cuid())
+  userId      String       @map("user_id")
+  projectId   String       @map("project_id")
+  title       String
+  description String?
+  status      BudgetStatus @default(DRAFT)
+  createdAt   DateTime     @default(now()) @map("created_at")
+  updatedAt   DateTime     @updatedAt @map("updated_at")
+
+  user      User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project   Project          @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  revisions BudgetRevision[]
+
+  @@map("budgets")
+}
+
+enum BudgetStatus {
+  DRAFT
+  FINALIZED
+  ARCHIVED
+}
+
+model BudgetRevision {
+  id                    String   @id @default(cuid())
+  budgetId              String   @map("budget_id")
+  revisionNumber        Int      @map("revision_number")
+  status                RevisionStatus @default(DRAFT)
+  
+  // Banco de referência vinculado
+  referenceDatabaseId   String?  @map("reference_database_id")
+  referenceState        String?  @map("reference_state")     // UF
+  referenceMonth        String?  @map("reference_month")     // YYYY/MM
+  referenceTaxRegime    TaxRegime? @map("reference_tax_regime")
+
+  // BDI padrão
+  bdiConfigId           String?  @map("bdi_config_id")
+
+  // Política de arredondamento
+  roundingPriceDecimals      Int    @default(4) @map("rounding_price_decimals")
+  roundingQuantityDecimals   Int    @default(4) @map("rounding_quantity_decimals")
+  roundingCoefficientDecimals Int   @default(5) @map("rounding_coefficient_decimals")
+  roundingTotalDecimals       Int   @default(2) @map("rounding_total_decimals")
+  roundingMode               String @default("ROUND_HALF_UP") @map("rounding_mode")
+
+  // Metadados
+  notes                 String?
+  technicalResponsible  String?  @map("technical_responsible")
+  baseDate              DateTime? @map("base_date")
+  createdAt             DateTime @default(now()) @map("created_at")
+  updatedAt             DateTime @updatedAt @map("updated_at")
+  finalizedAt           DateTime? @map("finalized_at")
+
+  budget             Budget             @relation(fields: [budgetId], references: [id], onDelete: Cascade)
+  referenceDatabase  ReferenceDatabase? @relation(fields: [referenceDatabaseId], references: [id], onDelete: SetNull)
+  bdiConfig          BdiConfig?         @relation(fields: [bdiConfigId], references: [id], onDelete: SetNull)
+  stages             Stage[]
+  snapshot           RevisionSnapshot?
+  auditResults       AuditResult[]
+
+  @@unique([budgetId, revisionNumber])
+  @@map("budget_revisions")
+}
+
+enum RevisionStatus {
+  DRAFT
+  FINALIZED
+}
+
+enum TaxRegime {
+  DESONERADO
+  NAO_DESONERADO
+}
+
+// ============================================================================
+// ESTRUTURA DO ORÇAMENTO: ETAPAS, SUBETAPAS, ITENS
+// ============================================================================
+
+model Stage {
+  id                String   @id @default(cuid())
+  budgetRevisionId  String   @map("budget_revision_id")
+  parentStageId     String?  @map("parent_stage_id")
+  code              String   // Numeração automática: 1, 1.1, 1.1.1
+  title             String
+  description       String?
+  sortOrder         Int      @map("sort_order")
+  createdAt         DateTime @default(now()) @map("created_at")
+  updatedAt         DateTime @updatedAt @map("updated_at")
+
+  budgetRevision BudgetRevision @relation(fields: [budgetRevisionId], references: [id], onDelete: Cascade)
+  parentStage    Stage?         @relation("StageHierarchy", fields: [parentStageId], references: [id], onDelete: Cascade)
+  childStages    Stage[]        @relation("StageHierarchy")
+  items          BudgetItem[]
+
+  @@map("stages")
+}
+
+model BudgetItem {
+  id              String  @id @default(cuid())
+  stageId         String  @map("stage_id")
+  compositionId   String  @map("composition_id")
+  sortOrder       Int     @map("sort_order")
+  
+  // Quantidade editável na planilha
+  quantity        Decimal @db.Decimal(18, 6)
+  
+  // BDI: pode usar o padrão da revisão ou ter exceção
+  bdiOverrideId   String? @map("bdi_override_id")
+  
+  // Valores calculados (cache, recalculados pelo motor)
+  unitCostMaterial     Decimal @default(0) @map("unit_cost_material") @db.Decimal(18, 4)
+  unitCostLabor        Decimal @default(0) @map("unit_cost_labor") @db.Decimal(18, 4)
+  unitCostEquipment    Decimal @default(0) @map("unit_cost_equipment") @db.Decimal(18, 4)
+  unitCostOther        Decimal @default(0) @map("unit_cost_other") @db.Decimal(18, 4)
+  unitCostTotal        Decimal @default(0) @map("unit_cost_total") @db.Decimal(18, 4)
+  subtotal             Decimal @default(0) @db.Decimal(18, 2)
+  bdiRate              Decimal @default(0) @map("bdi_rate") @db.Decimal(8, 4)
+  subtotalWithBdi      Decimal @default(0) @map("subtotal_with_bdi") @db.Decimal(18, 2)
+  
+  notes           String?
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  stage       Stage        @relation(fields: [stageId], references: [id], onDelete: Cascade)
+  composition Composition  @relation(fields: [compositionId], references: [id])
+  bdiOverride BdiConfig?   @relation("BdiOverride", fields: [bdiOverrideId], references: [id], onDelete: SetNull)
+
+  @@map("budget_items")
+}
+
+// ============================================================================
+// BANCOS DE REFERÊNCIA
+// ============================================================================
+
+model ReferenceDatabase {
+  id           String          @id @default(cuid())
+  userId       String          @map("user_id")
+  name         String
+  source       DatabaseSource
+  state        String?         // UF (para SINAPI/SICRO)
+  referenceMonth String?       @map("reference_month") // YYYY/MM
+  taxRegime    TaxRegime?      @map("tax_regime")
+  version      String?         // Versão da publicação
+  description  String?
+  active       Boolean         @default(true)
+  createdAt    DateTime        @default(now()) @map("created_at")
+  updatedAt    DateTime        @updatedAt @map("updated_at")
+
+  user          User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  resources     Resource[]
+  compositions  Composition[]
+  revisions     BudgetRevision[]
+
+  // Chave lógica composta para SINAPI
+  @@unique([userId, source, state, referenceMonth, taxRegime, version])
+  @@map("reference_databases")
+}
+
+enum DatabaseSource {
+  SINAPI
+  SICRO
+  CUSTOM
+  SUPPLIER
+}
+
+// ============================================================================
+// INSUMOS
+// ============================================================================
+
+model Resource {
+  id                  String   @id @default(cuid())
+  userId              String   @map("user_id")
+  referenceDatabaseId String?  @map("reference_database_id")
+  
+  // Identificação
+  code                String
+  description         String
+  unit                String   // Unidade de medida
+  category            ResourceCategory
+  
+  // Fonte e rastreabilidade
+  source              DatabaseSource @default(CUSTOM)
+  sourceState         String?        @map("source_state")
+  sourceMonth         String?        @map("source_month")
+  sourceTaxRegime     TaxRegime?     @map("source_tax_regime")
+  
+  // Preço atual
+  price               Decimal  @db.Decimal(18, 4)
+  priceDate           DateTime @map("price_date")
+  
+  // Mão de obra: encargos
+  laborChargesIncluded Boolean @default(false) @map("labor_charges_included")
+  laborChargesRate     Decimal? @map("labor_charges_rate") @db.Decimal(8, 4) // % de encargos
+  
+  // Fornecedor
+  supplierId          String?  @map("supplier_id")
+  
+  // Metadados técnicos
+  technicalAttributes Json?    @map("technical_attributes") // Atributos técnicos flexíveis
+  notes               String?
+  active              Boolean  @default(true)
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  user              User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  referenceDatabase ReferenceDatabase? @relation(fields: [referenceDatabaseId], references: [id], onDelete: SetNull)
+  supplier          Supplier?          @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+  priceHistory      ResourcePriceHistory[]
+  compositionComponents CompositionComponent[] @relation("ResourceComponent")
+  equivalences      ResourceEquivalence[] @relation("EquivalenceSource")
+  equivalentOf      ResourceEquivalence[] @relation("EquivalenceTarget")
+
+  // Chave lógica: código + fonte + estado + competência + regime
+  @@unique([userId, code, source, sourceState, sourceMonth, sourceTaxRegime])
+  @@index([code])
+  @@index([description])
+  @@index([category])
+  @@map("resources")
+}
+
+enum ResourceCategory {
+  MATERIAL
+  LABOR       // Mão de obra
+  EQUIPMENT   // Equipamento
+  OTHER       // Outros
+}
+
+model ResourcePriceHistory {
+  id          String   @id @default(cuid())
+  resourceId  String   @map("resource_id")
+  price       Decimal  @db.Decimal(18, 4)
+  source      String?  // Origem da alteração
+  reason      String?  // Motivo
+  author      String?  // Quem alterou
+  effectiveDate DateTime @map("effective_date")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  resource Resource @relation(fields: [resourceId], references: [id], onDelete: Cascade)
+
+  @@map("resource_price_history")
+}
+
+model ResourceEquivalence {
+  id              String   @id @default(cuid())
+  sourceResourceId String  @map("source_resource_id")
+  targetResourceId String  @map("target_resource_id")
+  confirmed       Boolean  @default(false)
+  confirmedBy     String?  @map("confirmed_by")
+  justification   String?
+  createdAt       DateTime @default(now()) @map("created_at")
+
+  sourceResource Resource @relation("EquivalenceSource", fields: [sourceResourceId], references: [id], onDelete: Cascade)
+  targetResource Resource @relation("EquivalenceTarget", fields: [targetResourceId], references: [id], onDelete: Cascade)
+
+  @@unique([sourceResourceId, targetResourceId])
+  @@map("resource_equivalences")
+}
+
+// ============================================================================
+// COMPOSIÇÕES
+// ============================================================================
+
+model Composition {
+  id                  String   @id @default(cuid())
+  userId              String   @map("user_id")
+  referenceDatabaseId String?  @map("reference_database_id")
+  
+  // Identificação
+  code                String
+  description         String
+  unit                String
+  
+  // Fonte e rastreabilidade
+  source              DatabaseSource @default(CUSTOM)
+  sourceState         String?        @map("source_state")
+  sourceMonth         String?        @map("source_month")
+  sourceTaxRegime     TaxRegime?     @map("source_tax_regime")
+  
+  // Tipo
+  type                CompositionType @default(ANALYTICAL)
+  
+  // Para composições fechadas: valor total de origem
+  closedTotalPrice    Decimal?  @map("closed_total_price") @db.Decimal(18, 4)
+  closedMaterialPrice Decimal?  @map("closed_material_price") @db.Decimal(18, 4)
+  closedLaborPrice    Decimal?  @map("closed_labor_price") @db.Decimal(18, 4)
+  closedEquipmentPrice Decimal? @map("closed_equipment_price") @db.Decimal(18, 4)
+  closedOtherPrice    Decimal?  @map("closed_other_price") @db.Decimal(18, 4)
+  
+  // Versionamento
+  version             Int      @default(1)
+  originCompositionId String?  @map("origin_composition_id") // Composição original (para duplicações)
+  
+  // Metadados
+  notes               String?
+  active              Boolean  @default(true)
+  isFavorite          Boolean  @default(false) @map("is_favorite")
+  createdAt           DateTime @default(now()) @map("created_at")
+  updatedAt           DateTime @updatedAt @map("updated_at")
+
+  user              User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  referenceDatabase ReferenceDatabase? @relation(fields: [referenceDatabaseId], references: [id], onDelete: SetNull)
+  originComposition Composition?       @relation("CompositionOrigin", fields: [originCompositionId], references: [id], onDelete: SetNull)
+  derivedCompositions Composition[]    @relation("CompositionOrigin")
+  components        CompositionComponent[] @relation("ParentComposition")
+  usedAsComponent   CompositionComponent[] @relation("ChildComposition")
+  budgetItems       BudgetItem[]
+
+  // Chave lógica composta
+  @@unique([userId, code, source, sourceState, sourceMonth, sourceTaxRegime, version])
+  @@index([code])
+  @@index([description])
+  @@map("compositions")
+}
+
+enum CompositionType {
+  ANALYTICAL  // Composição analítica: componentes detalhados
+  CLOSED      // Composição fechada: valor de origem preservado
+}
+
+model CompositionComponent {
+  id              String   @id @default(cuid())
+  compositionId   String   @map("composition_id")
+  
+  // Componente: insumo OU composição auxiliar (mutuamente exclusivos)
+  resourceId      String?  @map("resource_id")
+  childCompositionId String? @map("child_composition_id")
+  
+  coefficient     Decimal  @db.Decimal(18, 6)
+  notes           String?
+  sortOrder       Int      @map("sort_order")
+  createdAt       DateTime @default(now()) @map("created_at")
+  updatedAt       DateTime @updatedAt @map("updated_at")
+
+  composition      Composition  @relation("ParentComposition", fields: [compositionId], references: [id], onDelete: Cascade)
+  resource         Resource?    @relation("ResourceComponent", fields: [resourceId], references: [id], onDelete: SetNull)
+  childComposition Composition? @relation("ChildComposition", fields: [childCompositionId], references: [id], onDelete: SetNull)
+
+  @@map("composition_components")
+}
+
+// ============================================================================
+// BDI
+// ============================================================================
+
+model BdiConfig {
+  id          String   @id @default(cuid())
+  userId      String   @map("user_id")
+  name        String
+  description String?
+  version     Int      @default(1)
+  
+  // Componentes (armazenados como decimais: 5% = 0.05)
+  ac          Decimal  @default(0) @db.Decimal(8, 6)  // Administração Central
+  cf          Decimal  @default(0) @db.Decimal(8, 6)  // Custo Financeiro
+  s           Decimal  @default(0) @db.Decimal(8, 6)  // Seguros
+  g           Decimal  @default(0) @db.Decimal(8, 6)  // Garantias
+  mi          Decimal  @default(0) @db.Decimal(8, 6)  // Margem de Incerteza
+  tm          Decimal  @default(0) @db.Decimal(8, 6)  // Tributos Municipais
+  te          Decimal  @default(0) @db.Decimal(8, 6)  // Tributos Estaduais
+  tf          Decimal  @default(0) @db.Decimal(8, 6)  // Tributos Federais
+  l           Decimal  @default(0) @db.Decimal(8, 6)  // Lucratividade
+  
+  // Resultado calculado
+  bdiRate     Decimal  @default(0) @map("bdi_rate") @db.Decimal(8, 4) // BDI (%) resultado
+  
+  active      Boolean  @default(true)
+  isDefault   Boolean  @default(false) @map("is_default")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  user             User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  budgetRevisions  BudgetRevision[]
+  budgetItemOverrides BudgetItem[]    @relation("BdiOverride")
+  userPreferences  UserPreferences[]
+
+  @@map("bdi_configs")
+}
+
+// ============================================================================
+// FORNECEDORES
+// ============================================================================
+
+model Supplier {
+  id        String   @id @default(cuid())
+  userId    String   @map("user_id")
+  name      String
+  document  String?  // CNPJ
+  contact   String?
+  email     String?
+  phone     String?
+  address   String?
+  notes     String?
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  resources Resource[]
+
+  @@map("suppliers")
+}
+
+// ============================================================================
+// UNIDADES DE MEDIDA
+// ============================================================================
+
+model Unit {
+  id          String   @id @default(cuid())
+  symbol      String   @unique  // m, m², m³, kg, un, h, etc.
+  name        String   // metro, metro quadrado, etc.
+  dimension   String   // LENGTH, AREA, VOLUME, MASS, TIME, UNIT, OTHER
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  conversionsFrom UnitConversion[] @relation("ConversionFrom")
+  conversionsTo   UnitConversion[] @relation("ConversionTo")
+
+  @@map("units")
+}
+
+model UnitConversion {
+  id            String   @id @default(cuid())
+  userId        String?  @map("user_id") // null = sistema
+  fromUnitId    String   @map("from_unit_id")
+  toUnitId      String   @map("to_unit_id")
+  factor        Decimal  @db.Decimal(18, 10)
+  isExact       Boolean  @default(true) @map("is_exact")
+  justification String?  // Motivo para conversões não exatas
+  version       Int      @default(1)
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  user     User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+  fromUnit Unit  @relation("ConversionFrom", fields: [fromUnitId], references: [id], onDelete: Cascade)
+  toUnit   Unit  @relation("ConversionTo", fields: [toUnitId], references: [id], onDelete: Cascade)
+
+  @@unique([fromUnitId, toUnitId, version])
+  @@map("unit_conversions")
+}
+
+// ============================================================================
+// SNAPSHOTS (FINALIZAÇÃO IMUTÁVEL)
+// ============================================================================
+
+model RevisionSnapshot {
+  id                String   @id @default(cuid())
+  budgetRevisionId  String   @unique @map("budget_revision_id")
+  
+  // Dados completos serializados
+  snapshotData      Json     @map("snapshot_data")
+  // Inclui: insumos, coeficientes, preços, fontes, BDI, política de arredondamento,
+  //         estrutura de etapas/itens, totais calculados, auditoria
+
+  checksum          String   // SHA-256 do snapshot para integridade
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  budgetRevision BudgetRevision @relation(fields: [budgetRevisionId], references: [id], onDelete: Cascade)
+
+  @@map("revision_snapshots")
+}
+
+// ============================================================================
+// AUDITORIA
+// ============================================================================
+
+model AuditEntry {
+  id          String   @id @default(cuid())
+  userId      String   @map("user_id")
+  entityType  String   @map("entity_type")  // Budget, Composition, Resource, etc.
+  entityId    String   @map("entity_id")
+  action      String   // CREATE, UPDATE, DELETE, FINALIZE, IMPORT, etc.
+  changes     Json?    // { field: { old, new } }
+  metadata    Json?    // Dados extras contextuais
+  ipAddress   String?  @map("ip_address")
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([entityType, entityId])
+  @@index([userId])
+  @@index([createdAt])
+  @@map("audit_entries")
+}
+
+model AuditResult {
+  id                String   @id @default(cuid())
+  budgetRevisionId  String   @map("budget_revision_id")
+  type              AuditResultType
+  severity          AuditSeverity
+  code              String   // Código do erro/alerta
+  message           String
+  entityType        String?  @map("entity_type")
+  entityId          String?  @map("entity_id")
+  field             String?
+  justification     String?  // Justificativa para alertas ignorados
+  resolvedAt        DateTime? @map("resolved_at")
+  createdAt         DateTime @default(now()) @map("created_at")
+
+  budgetRevision BudgetRevision @relation(fields: [budgetRevisionId], references: [id], onDelete: Cascade)
+
+  @@map("audit_results")
+}
+
+enum AuditResultType {
+  MISSING_PRICE
+  INCOMPLETE_COMPOSITION
+  INVALID_QUANTITY
+  INVALID_BDI
+  INCOMPATIBLE_UNITS
+  BROKEN_REFERENCE
+  DUPLICATE_CHARGES
+  DIVERGENT_SOURCE
+  OTHER
+}
+
+enum AuditSeverity {
+  ERROR     // Bloqueia finalização
+  WARNING   // Permite justificativa
+  INFO
+}
+
+// ============================================================================
+// IMPORTAÇÃO
+// ============================================================================
+
+model ImportProfile {
+  id            String   @id @default(cuid())
+  userId        String   @map("user_id")
+  name          String
+  fileType      String   @map("file_type") // CSV, XLSX
+  dataType      String   @map("data_type") // RESOURCES, COMPOSITIONS, PRICES, BUDGET
+  delimiter     String?
+  encoding      String?
+  columnMapping Json     @map("column_mapping") // { targetField: sourceColumn }
+  createdAt     DateTime @default(now()) @map("created_at")
+  updatedAt     DateTime @updatedAt @map("updated_at")
+
+  user User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  jobs ImportJob[]
+
+  @@map("import_profiles")
+}
+
+// ============================================================================
+// JOBS DE IMPORTAÇÃO (ETAPA 12)
+// ============================================================================
+
+model ImportJob {
+  id             String   @id @default(cuid())
+  userId         String   @map("user_id")
+  profileId      String?  @map("profile_id")
+  dataType       String   @map("data_type") // RESOURCES, COMPOSITIONS, BUDGET
+  status         String   @default("PENDING") // PENDING, RUNNING, COMPLETED, FAILED
+  fileName       String   @map("file_name")
+  fileKey        String   @map("file_key")
+  fileSizeBytes  BigInt   @map("file_size_bytes")
+  checksum       String
+  idempotencyKey String   @map("idempotency_key")
+  storageDriver  String   @map("storage_driver")
+  mapping        Json
+  context        Json
+  totalRows      Int      @default(0) @map("total_rows")
+  createdCount   Int      @default(0) @map("created_count")
+  updatedCount   Int      @default(0) @map("updated_count")
+  skippedCount   Int      @default(0) @map("skipped_count")
+  errors         Json?
+  report         Json?
+  errorMessage   String?  @map("error_message")
+  attempts       Int      @default(0)
+  startedAt      DateTime? @map("started_at")
+  completedAt    DateTime? @map("completed_at")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  user    User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  profile ImportProfile? @relation(fields: [profileId], references: [id], onDelete: SetNull)
+
+  @@unique([userId, idempotencyKey])
+  @@index([status, createdAt])
+  @@index([userId, createdAt])
+  @@map("import_jobs")
+}
+
+// ============================================================================
+// MODELOS REUTILIZÁVEIS
+// ============================================================================
+
+model BudgetTemplate {
+  id          String   @id @default(cuid())
+  userId      String   @map("user_id")
+  name        String
+  description String?
+  templateData Json    @map("template_data") // Estrutura de etapas/itens serializada
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@map("budget_templates")
+}
+
+// ============================================================================
+// IA OPCIONAL
+// ============================================================================
+
+model AiProviderConfig {
+  id          String   @id @default(cuid())
+  userId      String   @map("user_id")
+  provider    String   // openai, gemini, openrouter
+  model       String?  // gpt-4, gemini-pro, etc.
+  apiKeyEncrypted String @map("api_key_encrypted") // Criptografada com AES-256-GCM
+  apiKeyIv    String   @map("api_key_iv")          // IV para decriptação
+  isActive    Boolean  @default(true) @map("is_active")
+  lastTestedAt DateTime? @map("last_tested_at")
+  lastTestResult String? @map("last_test_result") // SUCCESS, FAILED, etc.
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, provider])
+  @@map("ai_provider_configs")
+}
+
+// ============================================================================
+// BACKUP
+// ============================================================================
+
+model BackupLog {
+  id               String    @id @default(cuid())
+  userId           String?   @map("user_id")
+  type             String    // FULL, INCREMENTAL
+  status           String    // STARTED, COMPLETED, FAILED
+  fileUrl          String?   @map("file_url")
+  storageKey       String?   @map("storage_key")
+  storageDriver    String?   @map("storage_driver")
+  format           String?   // CUSTOM, PLAIN
+  fileSizeBytes    BigInt?   @map("file_size_bytes")
+  checksum         String?
+  metadata         Json?
+  errorMessage     String?   @map("error_message")
+  restoreVerified  Boolean   @default(false) @map("restore_verified")
+  restoreCheckedAt DateTime? @map("restore_checked_at")
+  restoreTarget    String?   @map("restore_target")
+  startedAt        DateTime  @map("started_at")
+  completedAt      DateTime? @map("completed_at")
+  createdAt        DateTime  @default(now()) @map("created_at")
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([status, createdAt])
+  @@map("backup_logs")
+}
